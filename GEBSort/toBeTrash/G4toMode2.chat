@@ -1,0 +1,51 @@
+# v/c correction for G4_obs and g4_emit spectra
+
+vc 0.0
+
+# packing distance in mm
+
+minr 6.0
+
+# min energy before observation
+
+emin 5.0
+
+# EU smearing function multiplication factors
+
+eSmear_seg 4.0
+eSmear_CC  1.0
+pSmear 1.0
+
+# not sure
+
+maxdist 300
+
+# enabled crystals (1-120 == all crystals)
+
+enabled 0-120
+
+#modulus for time stamps
+# use 1 for singles G4 data
+# use 2 for 60Co coincidence data
+# etc
+
+evmod 1
+
+# some limitation values
+
+maxevents 2000000000
+
+minNoInteractions 1
+maxNoInteractions 12
+
+minNoCrystals 1
+maxNoCrystals 180
+
+nprint 20
+
+#--------------------------------------------
+# special for G4 data where we do not
+# want to rotate into crystal coordinates
+
+;noworldtocrystalrot
+

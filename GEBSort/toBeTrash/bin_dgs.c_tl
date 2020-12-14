@@ -1,0 +1,836 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <math.h>
+#include <string.h>
+#include <assert.h>
+#include <limits.h>
+
+#include "Rtypes.h"
+#include "TROOT.h"
+#include "TFile.h"
+#include "TRandom.h"
+#include "TH1.h"
+#include "TH2.h"
+#include "TObjArray.h"
+#include "TObject.h"
+#include "TKey.h"
+#include "TSystem.h"
+#include "TCutG.h"
+#include "TTree.h"
+#include "gdecomp.h"
+
+#include "GEBSort.h"
+#include "GTMerge.h"
+#define NGSGE NGE
+#include "gsang.h"
+
+#define ALL2DS 1
+
+
+/* Gain Calibration */
+
+float ehigain[NGE + 1];
+float ehioffset[NGE + 1];
+float ehibase[NGE + 1];
+void SetBeta ();
+
+/* Other variables */
+
+unsigned long long int EvTimeStam0 = 0;
+
+/* pointers to ROOT spectra */
+
+TH1D *hEventCounter;
+TH2F *hGeCounter, *hBGOCounter;
+TH2F *hEhiRaw, *hEhiRawRaw, *hEhiCln, *hEhiDrty, *hEhiCln_nodop;
+TH2F *hGeBGO_DT;
+TH2F *pzraw;
+TH2F *base1_diff;
+TH2F *base2_diff;
+TH1D *hrr;
+TH2F *dgs_gg;
+
+#if(ALL2DS)
+TH2F *e2_e1vse1[NGE + 1];
+TH2F *SZe2_e1vse1[NGE + 1];
+TH2F *hbase1, *hbase2;
+#endif
+
+/* parameters */
+
+extern DGSEVENT DGSEvent[MAXCOINEV];
+extern int ng;
+extern PARS Pars;
+int tlkup[NCHANNELS];
+int tid[NCHANNELS];
+
+extern double angle[NGSGE], anglephi[NGSGE];
+
+extern double DopCorFac[NGSGE], ACFac[NGSGE];
+
+int en = 0;
+float bl_array[5000];
+
+float base1, base2, base1_av = 0;
+float ave_base[NGE + 1];
+
+int firstbl = 1;
+long long int dgsHeaderID[20];
+
+float PZ[NGE + 1];
+
+long long int ngood_e[NGE + 1];
+long long int nbad_e[NGE + 1];
+
+/*-----------------------------------------------------*/
+
+int
+exit_dgs ()
+{
+  /* declarations */
+
+  int i;
+  long long int ill;
+  double d1;
+  FILE *fp;
+
+  printf ("\nbegin exit_dgs\n");
+
+  /* header ID statistics */
+
+  ill = 0;
+  for (i = 0; i < 20; i++)
+    ill += dgsHeaderID[i];
+  for (i = 0; i < 20; i++)
+    if (dgsHeaderID[i] > 0)
+      printf ("DGS header ID %2i seen %12lli times, %6.2f%%\n", i, dgsHeaderID[i], 100.0 * dgsHeaderID[i] / ill);
+
+  /* good/bad energies */
+
+  printf ("\n");
+  printf ("good/bad energy statistics\n");
+  printf ("\n");
+  for (i = 1; i <= NGE + 1; i++)
+    if (ngood_e[i] > 0)
+      {
+        d1 = ngood_e[i] + nbad_e[i];
+        d1 = ngood_e[i] / d1;
+        d1 *= 100.0;
+        printf ("ge %3i good/total fraction: %7.1f %%\n", i, d1);
+      };
+  printf ("\n");
+
+  /* list avarage base lines we had at the end */
+
+  fp = fopen ((char *) "last_baseline.txt", "w");
+  printf ("last running baseline values:\n");
+  for (i = 0; i < NGE; i++)
+    if (ave_base[i] > 0)
+      {
+        printf ("ave_base[%3i]=%8.1f\n", i, ave_base[i]);
+        fprintf (fp, "%i %f\n", i, ave_base[i]);
+      };
+  printf ("\n");
+  fclose (fp);
+
+  /* done */
+
+  printf ("done exit_dgs\n");
+  return (0);
+
+};
+
+/*-----------------------------------------------------*/
+
+int
+sup_dgs ()
+{
+  /* declarations */
+
+  char str[STRLEN];
+  int i, i1, i2, i7, i8;
+  int imod, ichan;
+  FILE *fp;
+  float r1;
+
+  void getcal (char *);
+
+// functions for making root histograms 
+
+  TH2F *make2D (const char *, int, int, int, int, int, int);
+  TH1D *make1D (const char *, int, int, int);
+
+/* base diff spectra */
+
+#if(ALL2DS)
+  base1_diff = make2D ("base1_diff", NGE + 1, 1, NGE + 1, 2048, -1024, 1024);
+  base2_diff = make2D ("base2_diff", NGE + 1, 1, NGE + 1, 2048, -1024, 1024);
+  hbase1 = make2D ("hbase1", NGE + 1, 1, NGE + 1, 4096, 0, 16384);
+  hbase2 = make2D ("hbase2", NGE + 1, 1, NGE + 1, 4096, 0, 16384);
+#endif
+
+
+// 2-D's for Rate
+
+  hEventCounter = make1D ("EvntCounter", 14400, 0, 14400);      // Good for 4 hours if Counts/sec
+  hrr = make1D ("rr", 1012, 0, 2);
+  hGeCounter = make2D ("GeCounter", 14400, 0, 14400, NGE + 1, 1, NGE + 1);
+  hBGOCounter = make2D ("BGOCounter", 14400, 0, 14400, NGE + 1, 1, NGE + 1);
+#if(ALL2DS)
+  for (i = 1; i <= NGE; i++)
+    {
+      sprintf (str, "e2_e1vse1_%3.3i", i);
+      e2_e1vse1[i] = make2D (str, 2048, 1, 10000, 1024, 1, 10000);
+      sprintf (str, "SZe2_e1vse1_%3.3i", i);
+      SZe2_e1vse1[i] = make2D (str, 2048, 1, 10000, 1024, 1, 10000);
+    };
+#endif
+
+// 2-D's for Energy
+
+  hEhiRaw = make2D ("EhiRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);  
+  hEhiRawRaw = make2D ("EhiRawRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  hEhiCln = make2D ("EhiCln", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  hEhiCln_nodop = make2D ("EhiCln_nodop", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  hEhiDrty = make2D ("EhiDrty", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+
+// 2-D's for Tacs
+
+  hGeBGO_DT = make2D ("GeBGO_DT", 400, -200, 200, NGE + 1, 1, NGE + 1);
+
+// 2-D's for PZ and Baseline
+
+  pzraw = make2D ("pzraw", NGE + 1, 1, NGE + 1, 2000, 0, 2.0);
+
+  /* simple gg matix */
+
+  dgs_gg = make2D ("gg", Pars.GGMAX, 1, Pars.GGMAX, Pars.GGMAX, 1, Pars.GGMAX);
+  dgs_gg->SetXTitle ("g1");
+  dgs_gg->SetYTitle ("g2");
+
+/* list what we have */
+
+  //printf (" we have define the following spectra:\n");
+
+  Pars.wlist = gDirectory->GetList ();
+//  Pars.wlist->Print ();
+
+  /* -------------------- */
+  /* read in the map file */
+  /* -------------------- */
+
+  for (i = 0; i < NCHANNELS; i++)
+    {
+      tlkup[i] = NOTHING;
+      tid[i] = NOTHING;
+    };
+
+  fp = fopen ("map.dat", "r");
+  if (fp == NULL)
+    {
+      printf ("need a \"map.dat\" file to run\n");
+      exit (1);
+    };
+
+  printf ("\nmapping - started\n");
+
+  i2 = fscanf (fp, "\n%i %i %i %s", &i1, &i7, &i8, str);
+  while (i2 == 4)
+    {
+      tlkup[i1] = i7;
+      tid[i1] = i8;
+      i2 = fscanf (fp, "\n%i %i %i %s", &i1, &i7, &i8, str);
+      ichan = i1 % 10;
+      imod = (i1 - ichan) / 10;
+      printf ("map: %4i ( %3i %1i ) %3i %3i %7s -- (official) ", i1, imod, ichan, i7, i8, str);
+      switch (i7)
+        {
+        case GE:
+          printf ("GE\n");
+          break;
+        case BGO:
+          printf ("BGO\n");
+          break;
+        case SIDE:
+          printf ("SIDE\n");
+          break;
+        case AUX:
+          printf ("AUX\n");
+          break;
+        case DSSD:
+          printf ("DSSD\n");
+          break;
+        case FP:
+          printf ("FP\n");
+          break;
+        case XARRAY:
+          printf ("XARRAY\n");
+          break;
+        case CHICO2:
+          printf ("CHICO2\n");
+          break;
+        case SSD:
+          printf ("SSD\n");
+          break;
+        case CLOVER:
+          printf ("CLOVER\n");
+          break;
+        case SPARE:
+          printf ("SPARE\n");
+          break;
+        case SIBOX:
+          printf ("SIBOX\n");
+          break;
+        default:
+          printf ("dont know what this is\n");
+          break;
+
+        };
+    };
+  fclose (fp);
+
+  printf ("\nmapping - complete!!\n");
+
+  /* Set Default Calibration and PZ parameters */
+
+  for (i = 0; i <= NGE + 1; i++)
+    {
+      ehigain[i] = 1.0;
+      ehioffset[i] = 0.0;
+      PZ[i] = 1.0;
+      ehibase[i] = 0.0;
+    };
+
+  for (i = 0; i < 5000; i++)
+    {
+      bl_array[i] = 0;
+    }
+
+  for (i = 0; i < NGE + 1; i++)
+    {
+      ave_base[i] = 0;
+    }
+
+
+  /* get the DGS calibration file */
+
+  getcal (Pars.dgs_ecalfn);
+
+  /* dgs header ids */
+
+  for (i = 0; i < 20; i++)
+    dgsHeaderID[i] = 0;
+
+#if(0)
+  /* list enabled detectors */
+
+  for (j = 0; j < MAXDETNO; j++)
+    if (!Pars.enabled[j])
+      printf ("bin_dgs: detector %3i is DISABLED\n", j);
+  printf ("all others are enabled\n");
+#endif
+
+  /* good/bad energies */
+
+  for (i = 0; i < NGE + 1; i++)
+    {
+      ngood_e[NGE + 1] = 0;
+      nbad_e[NGE + 1] = 0;
+    };
+
+  fp = fopen ((char *) "last_baseline.txt", "r");
+  if (fp != NULL)
+    {
+      printf ("last running baseline values:\n");
+      i2 = fscanf (fp, "%i %f", &i1, &r1);
+      while (i2 == 2)
+        {
+          ave_base[i1] = r1;
+          printf ("start ave_base[%3i]=%8.1f\n", i1, ave_base[i1]);
+          i2 = fscanf (fp, "%i %f", &i1, &r1);
+        };
+      printf ("\n");
+      fclose (fp);
+    }
+  else
+    {
+      for (i = 0; i < NGE; i++)
+        ave_base[i] = 0;
+    };
+
+
+  /* done */
+
+  printf ("Pars.dgs_MM= %f\n", Pars.dgs_MM);
+
+  printf ("\nsup_dgs done!!\n");
+
+  return (0);
+
+};
+
+
+/* ----------------------------------------------------------------- */
+
+int
+bin_dgs (GEB_EVENT * GEB_event)
+{
+
+  /* declarations */
+
+  char str[128];
+  int i, j, gsid, e, st;
+  double d1, d2, erawraw[NGE+1];
+
+  int RelEvT = 0, tdiff = 0;
+  float Energy, Energy_nodop, top, bot, r1, rr;
+
+  /* prototypes */
+
+  int GebTypeStr (int type, char str[]);
+  int DGSEvDecompose_v3 (unsigned int *ev, int len, DGSEVENT * DGSEvent, int tlkup[], int tid[]);
+
+  /* Print debug */
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    printf ("\nentered bin_dgs:\n");
+
+#if(0)
+  /* temp fix of header ID XA-->DGS for testing */
+
+  for (i = 0; i < GEB_event->mult; i++)  
+    if (GEB_event->ptgd[i]->type == 24) 
+      GEB_event->ptgd[i]->type =GEB_TYPE_DGS;
+#endif
+
+  /* loop through the coincidence event and fish out DGS data */
+  /* (gamma rays) count in ng */
+
+//for (i=0;i<10;i++)
+//  printf("debug1: tlkup=%i tid=%i \n",tlkup[i],tid[i]); 
+
+  ng = 0;
+  for (i = 0; i < GEB_event->mult; i++)
+    {
+      if (GEB_event->ptgd[i]->type == GEB_TYPE_DGS)
+        {
+          if (Pars.CurEvNo <= Pars.NumToPrint)
+            {
+              GebTypeStr (GEB_event->ptgd[i]->type, str);
+              printf ("bin_dgs (header): %2i> %2i, %s, TS=%lli\n", i, GEB_event->ptgd[i]->type, str,
+                      GEB_event->ptgd[i]->timestamp);
+            }
+
+          st =
+            DGSEvDecompose_v3 ((unsigned int *) GEB_event->ptinp[i], GEB_event->ptgd[i]->length / sizeof (unsigned int),
+                               &DGSEvent[ng], tlkup, tid);
+          if (st != 0)
+            return (0);
+          ng++;
+        }
+    }
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    {
+      printf ("\n\nCurEvNo: %i has %i DGS events (ng)\n", Pars.CurEvNo, ng);
+      for (i = 0; i < ng; i++)
+        {
+          printf ("DGSEvent[%i].event_timestamp: %llu ", i, DGSEvent[i].event_timestamp);
+          printf ("tpe= %i tid=%i\n", DGSEvent[i].tpe, DGSEvent[i].tid);
+        };
+    };
+
+  if (EvTimeStam0 == 0)
+    EvTimeStam0 = DGSEvent[0].event_timestamp;
+  RelEvT = (int) ((DGSEvent[0].event_timestamp - EvTimeStam0) / 100000000);     // overflow?
+  hEventCounter->Fill (RelEvT);
+
+  /* Loop */
+
+  for (i = 0; i < ng; i++)
+    {
+      gsid = DGSEvent[i].tid;
+      if (DGSEvent[i].tpe == GE)
+        {
+
+          /* this should be unnecessary to do; */
+          /* but we sometimes crash if we don't */
+          /* needs to be looked at */
+
+          if (gsid < 1 || gsid > NGE)
+            {
+              printf ("bad gsid= %i\n", gsid);
+              fflush (stdout);
+              gsid = 0;
+            };
+
+          hGeCounter->Fill ((int) ((DGSEvent[0].event_timestamp - EvTimeStam0) / 100000000), gsid);
+
+          /* current baseline; SZ's Method1 implementation */
+
+          if (Pars.CurEvNo <= Pars.NumToPrint)
+            {
+              printf ("\n");
+              printf ("m1begin= DGSEvent[%i].m1begin  = %8i w11,lobit\n", i, DGSEvent[i].m1begin);
+              printf ("m1end  = DGSEvent[%i].m1end    = %8i w11,upbit ", i, DGSEvent[i].m1end);
+              printf ("diff %i\n", DGSEvent[i].m1begin - DGSEvent[i].m1end);
+              printf ("m2begin= DGSEvent[%i].m2begin  = %8i w10,upbit\n", i, DGSEvent[i].m2begin);
+              printf ("m2end  = DGSEvent[%i].m2end    = %8i w10,lobit ", i, DGSEvent[i].m2end);
+              printf ("diff %i\n", DGSEvent[i].m2begin - DGSEvent[i].m2end);
+            };
+
+
+          top = (float) (DGSEvent[i].sum2 * DGSEvent[i].m1begin - DGSEvent[i].sum1 * DGSEvent[i].m2begin);
+          bot = DGSEvent[i].sum2 - DGSEvent[i].sum1;
+          bot -= Pars.dgs_MM * (DGSEvent[i].m2begin - DGSEvent[i].m1begin);
+          base1 = top / bot;
+
+          top = (float) (DGSEvent[i].m1end * DGSEvent[i].m2begin - DGSEvent[i].m1begin * DGSEvent[i].m2end);
+          bot = (DGSEvent[i].m2begin - DGSEvent[i].m2end) - (DGSEvent[i].m1begin - DGSEvent[i].m1end);
+          base2 = top / bot;
+
+#if(ALL2DS)
+          if (Pars.enabled[gsid])
+            {
+              base1_diff->Fill ((double) gsid, DGSEvent[i].m1begin - DGSEvent[i].m1end);
+              base2_diff->Fill ((double) gsid, DGSEvent[i].m2begin - DGSEvent[i].m2end);
+              hbase1->Fill ((double) gsid, (double) base1);
+              hbase2->Fill ((double) gsid, (double) base2);
+            };
+#endif
+
+          /* keep a running average of the baseline */
+          /* avoid extreme values (per Darek) */
+          /* add constraints from SZ as well */
+
+          rr = base1 / base2;
+          if (rr > 0.0 && rr < 2.0)
+            hrr->Fill (double (rr));
+
+          if ((base1 < 40000) && (base1 > 0))
+            if ((DGSEvent[i].sum2 - DGSEvent[i].sum1) > 200)
+              if (rr > 0.95 && rr < 1.05)
+                if (ave_base[gsid] > 0)
+                  ave_base[gsid] = ave_base[gsid] * 0.99 + base1 * 0.01;
+                else
+                  ave_base[gsid] = base1;
+
+          /* this is SZ's baseline restore correction, see */
+          /* soffice /home/tl/d6/keep/2018_zhu_baseline.ppt */
+          /* ave_base: the running base. note: Pars.dgs_MM is a float */
+
+#if(1)
+
+          /* use average base */
+
+          Energy = DGSEvent[i].sum2 / Pars.dgs_MM - DGSEvent[i].sum1 * PZ[gsid] / Pars.dgs_MM;
+          Energy -= (1. - PZ[gsid]) * ave_base[gsid];
+#endif
+#if(0)
+          /* use event base (you get noise) */
+
+          Energy = DGSEvent[i].sum2 / Pars.dgs_MM - DGSEvent[i].sum1 * PZ[gsid] / Pars.dgs_MM;
+          Energy -= (1. - PZ[gsid]) * base2;
+#endif
+
+          if (Pars.CurEvNo <= Pars.NumToPrint)
+            {
+              printf ("\n");
+              printf ("DGSEvent[i].sum2= %i\n", DGSEvent[i].sum2);
+              printf ("DGSEvent[i].sum1= %i\n", DGSEvent[i].sum1);
+              printf ("Pars.dgs_MM= %f\n", Pars.dgs_MM);
+              printf ("PZ[%i]= %f\n", gsid, PZ[gsid]);
+              printf ("base1= %8.1f base2= %8.1f, diff= %8.1f rat= %5.2f\n", base1, base2, base1 - base2,
+                      base1 / base2);
+              printf ("ave_base[%i]= %f\n", gsid, ave_base[gsid]);
+              printf ("Energy = %f (uncalibrated)\n", Energy);
+            };
+
+          /* gain match */
+
+          erawraw[i]=Energy;
+          Energy = Energy * ehigain[gsid] + ehioffset[gsid];
+          if (Pars.CurEvNo <= Pars.NumToPrint)
+            {
+              printf ("Energy = %f (calibrated)\n", Energy);
+            };
+
+          /* count good and bad energies */
+
+          if (Energy > 10.0 && Energy < 4000.0)
+            {
+              ngood_e[gsid]++;
+              if (Pars.CurEvNo <= Pars.NumToPrint)
+                printf ("GOOD energy\n");
+            }
+          else
+            {
+              nbad_e[gsid]++;
+              if (Pars.CurEvNo <= Pars.NumToPrint)
+                printf ("BAD energy\n");
+            }
+
+
+          /* dopler correct the energy */
+
+          Energy_nodop = Energy;
+          if (Pars.beta != 0)
+            {
+              d1 = angtheta[gsid - 1] / 57.29577951;
+              Energy = Energy * (1 - Pars.beta * cos (d1)) / sqrt (1 - Pars.beta * Pars.beta);
+            }
+          if (Pars.enabled[gsid])
+            {
+              DGSEvent[i].ehi = Energy;
+              DGSEvent[i].ehi_nodop = Energy_nodop;
+            }
+          else
+            {
+              /* mark bad */
+              DGSEvent[i].ehi = -1;
+              DGSEvent[i].ehi_nodop = -1;
+            }
+          DGSEvent[i].id = gsid;
+
+
+
+#if(ALL2DS)
+          if (Pars.enabled[gsid])
+            {
+              d1 = (DGSEvent[i].sum2 - DGSEvent[i].sum1) / Pars.dgs_MM; /* uncorrected energy */
+              d2 = DGSEvent[i].sum1 / Pars.dgs_MM;      /* ~ baseline */
+              if (gsid <= NGE)
+                if (d1 < (double) 8192)
+                  if (d2 < (double) 8192)
+                    {
+                      e2_e1vse1[gsid]->Fill (d1, d2, 1);
+                      d1 = DGSEvent[i].ehi;     /* SZ corrected */
+                      SZe2_e1vse1[gsid]->Fill (d1, d2, 1);
+                    };
+            };
+#endif
+
+          /* fill SZ's pol zero (raw) spectrum */
+
+          top = DGSEvent[i].m2end - DGSEvent[i].m1end;
+          bot = DGSEvent[i].m2begin - DGSEvent[i].m1begin;
+          r1 = top / bot;
+          if (r1 > 0 && r1 < 2.0)
+            if (Pars.enabled[gsid])
+              pzraw->Fill (gsid, r1);
+
+          /* do the Compton suppression by setting a flag */
+          /* loop through event for BGO */
+
+          for (j = 0; j < ng; j++)
+            {
+              if (DGSEvent[j].tpe == BGO && DGSEvent[j].tid == gsid)
+                {               // BGO & GE in coincidence
+                  tdiff = (int) (DGSEvent[i].event_timestamp - DGSEvent[j].event_timestamp);
+                  hGeBGO_DT->Fill (tdiff, gsid);
+                  if (abs (tdiff) <= 50)
+                    {
+                      DGSEvent[i].flag = 1;     // Mark as Dirty Ge
+//                    printf("BGO %i vetoed\n",DGSEvent[j].tid);
+                    };
+                }
+            }
+        }
+
+
+      if (DGSEvent[i].tpe == BGO)
+        {
+          if (Pars.enabled[gsid])
+            {
+              hBGOCounter->Fill ((int) ((DGSEvent[0].event_timestamp - EvTimeStam0) / 100000000), DGSEvent[i].tid);
+              DGSEvent[i].ehi = (float) (DGSEvent[i].sum2) - (float) (DGSEvent[i].sum1);
+            }
+          else
+            {
+              DGSEvent[i].ehi = -1;
+            }
+        };
+
+    }                           /* for (i = 0; i < ng; i++) */
+
+  /* Energy Histogram loop */
+
+  for (i = 0; i < ng; i++)
+    {
+      if (DGSEvent[i].tpe == GE)
+        {
+          if (erawraw[i]>0 && erawraw[i]< LENSP)
+            hEhiRawRaw->Fill (erawraw[i], gsid);
+          e = (int) DGSEvent[i].ehi;
+          if (e > 0 && e < LENSP)
+            {
+              gsid = DGSEvent[i].tid;
+              hEhiRaw->Fill (e, gsid);
+              if (DGSEvent[i].flag == 0)
+                {
+                  hEhiCln->Fill (e, gsid);
+                  hEhiCln_nodop->Fill (DGSEvent[i].ehi_nodop, gsid);
+                };
+              if (DGSEvent[i].flag == 1)
+                hEhiDrty->Fill (e, gsid);
+            };
+        };
+    }
+
+  /* gg matrix */
+
+  for (i = 0; i < ng; i++)
+    if (Pars.enabled[DGSEvent[i].tid])
+      if (DGSEvent[i].tpe == GE)
+        if (DGSEvent[i].flag == 0)
+          if (DGSEvent[i].ehi > 0 && DGSEvent[i].ehi < Pars.GGMAX)
+            for (j = i + 1; j < ng; j++)
+              if (Pars.enabled[DGSEvent[j].tid])
+                if (DGSEvent[j].tpe == GE)
+                  if (DGSEvent[j].flag == 0)
+                    if (DGSEvent[j].ehi > 0 && DGSEvent[j].ehi < Pars.GGMAX)
+                      {
+                        dgs_gg->Fill ((double) DGSEvent[i].ehi, (double) DGSEvent[j].ehi, 1);
+                        if (Pars.CurEvNo <= Pars.NumToPrint)
+                          printf ("filled dgs_gg with %f %f\n", DGSEvent[i].ehi, DGSEvent[j].ehi);
+                      }
+
+/* debug list the gamma rays we found */
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    {
+      printf ("final list: we have %i gamma rays\n", ng);
+      for (i = 0; i < ng; i++)
+        {
+          printf ("%2i> ", i);
+          printf ("chan_id=%i; ", DGSEvent[i].chan_id);
+          printf ("board_id=%i; ", DGSEvent[i].board_id);
+          printf ("id =%i; ", DGSEvent[i].id);
+          printf ("tpe=%i; ", DGSEvent[i].tpe);
+          printf ("tid=%i; ", DGSEvent[i].tid);
+          printf ("EventTS=%llu; ", DGSEvent[i].event_timestamp);
+          printf ("ehi=%8f ", DGSEvent[i].ehi);
+          if (DGSEvent[i].flag == 1)
+            printf ("(dirty)");
+          else
+            printf ("(clean)");
+          if (Pars.enabled[gsid])
+            printf ("(enabled)");
+          else
+            printf ("(disabled)");
+          printf ("\n");
+          fflush (stdout);
+        };
+    };
+
+  /* done */
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    printf ("exit bin_dgs\n");
+
+  return (0);
+
+}
+
+/* ---------------------------------------------------------------------*/
+
+TH2F *
+make2D (const char *txt, int xln, int xlo, int xhi, int yln, int ylo, int yhi)
+{
+  char str[STRLEN];
+
+  TH2F *mkTH2F (char *, char *, int, double, double, int, double, double);
+
+
+  TH2F *h2D;
+
+  sprintf (str, txt);
+  h2D = mkTH2F (str, str, xln, xlo, xhi, yln, ylo, yhi);
+
+  return h2D;
+}
+
+/*---------------------------------------------------------------------*/
+
+TH1D *
+make1D (const char *txt, int xln, int xlo, int xhi)
+{
+  char str[STRLEN];
+  double xlod, xhid;
+  TH1D *mkTH1D (char *, char *, int, double, double);
+  TH1D *h1D;
+
+  xlod = xlo;
+  xhid = xhi;
+
+  sprintf (str, txt);
+  h1D = mkTH1D (str, str, xln, xlod, xhid);
+  return h1D;
+}
+
+/*---------------------------------------------------------------------*/
+
+void
+getcal (char *file)
+{
+  int i, ret = 0;
+  float b, c, d;
+  char mystring[1000];
+  FILE *fp;
+
+
+  /* get pol zero */
+
+  fp = fopen (Pars.dgs_PZfn, "r");      // read mode
+  if (fp == NULL)
+    {
+      printf ("could not open the DGS PZ file: %s; use default == 1\n", Pars.dgs_PZfn);
+    }
+  else
+    {
+
+      // read file and parse
+
+      while (fgets (mystring, 100, fp) != NULL)
+        {
+          ret = sscanf (mystring, "%i %f ", &i, &b);
+          PZ[i] = b;
+//      printf ("ge %3i has pz of %8.4f\n", i, PZ[i]);
+        }
+      fclose (fp);
+    };
+
+
+  /* get energy cal file */
+
+  fp = fopen (Pars.dgs_ecalfn, "r");    // read mode
+  if (fp == NULL)
+    {
+      printf ("could not open the DGS cal file: %s; set 0 offset and 1.0 gain\n", Pars.dgs_ecalfn);
+      for (i = 1; i <= 110; i++)
+        {
+          ehigain[i] = 1;
+          ehioffset[i] = 0;
+        };
+    }
+  else
+    {
+
+      // read file and parse
+
+      while (fgets (mystring, 100, fp) != NULL)
+        {
+          ret = sscanf (mystring, "%i %f %f ", &i, &c, &d);
+          ehigain[i] = d;
+          ehioffset[i] = c;
+          printf ("ge %3i has offset and gain of: %8.2f %8.4f and a PZ of %8.4f ", i, ehioffset[i], ehigain[i], PZ[i]);
+          if (Pars.enabled[i])
+            printf ("enabled\n");
+          else
+            printf ("DISABLED!\n");
+        }
+      fclose (fp);
+    };
+
+}

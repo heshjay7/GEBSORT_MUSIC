@@ -1,0 +1,305 @@
+echo
+
+#------------------------------------
+# chatscript to process hits in the GRETA
+# germanium shell. Self documenting.
+#------------------------------------
+
+# maximum number of events to cluster and track
+# debug parameter really...
+
+maxevents 2000000000
+maxevents 10000
+
+#################################################
+# data type; default is GRETINA
+# you can specify AGATA_data and crmat file
+#################################################
+
+;AGATA_data GANIL_AGATA_crmat.dat
+
+#################################################
+# target position in 'mm' in GT coordinate system
+# z along beam, x down in the ground, y towards GS
+# always subtracted in the code
+#################################################
+
+target_x 0
+target_y 0
+target_z 0
+
+#################################################
+# coincidence window
+#################################################
+
+dtwin  50
+
+#################################################
+# bad theoretical angle penalty to add
+# to fom is the energies are impossible
+# in the Compton scattering formula. Set
+# to zero to get old acos truncation
+
+badTheoAngPenalty 0.4
+
+#################################################
+# attempt to fix the double interactions in
+# same segment problem, quite experimental
+
+fixdoublehits 0
+
+#################################################
+# CC and Segment energy calibration
+#################################################
+# NOTE: this only calibrates mode-1 data!!!!
+# __we do not touch the original mode-2 data in
+# __the tracking process, it is just passed through.
+CCcal CCenergy.cal
+;SEGcal SEGenergy.cal
+
+#################################################
+# modify the  decomposition
+# energies in the tracking 
+#################################################
+
+# use the CC FPGA energies or segment FPGA energies
+
+useCCEnergy
+;useSegEnergy
+
+##################
+# clustering angle
+##################
+
+#clustering angle (degrees) [aka 'alpha']
+#
+#              +---- for this number of interaction points
+#              |  +--- use this cluster angle
+clusterangle   1  20
+clusterangle   10 20
+
+# you must specify for 1 interaction point!
+# Track will interpolate
+# the values you give
+
+#################################################
+# enabled detectors
+
+enabled "1-130"
+
+##############################################
+# FOM we assign to single hits 
+# so they can be on an equal playing
+# field with multihits that have a finite FOM
+##############################################
+
+singlesfom 0.0
+
+#----------------------------------------
+# ndet and associated energy range limits
+#----------------------------------------
+
+# for each number of sector hits (==ndet)
+# we expect a certain energy range. Assign
+# events outside these limits a FOM that 
+# excludes them from further analysis
+#        +-- ndet value
+#        |    +-- elo limits
+#        |    |     +-- ehi limits
+#        |    |     |   +-- assign this FOM value if outside
+#        |    |     |   |
+;ndetElim 1   0.0   0.8 1.81
+;ndetElim 2   0.0   1.6 1.82
+;ndetElim 3   0.0   3.2 1.83
+;ndetElim 4   0.4   6.4 1.84
+;ndetElim 5   0.8  18.8 1.85
+;ndetElim 6   1.6  27.6 1.86
+;ndetElim 7   3.2  53.2 1.87
+;ndetElim 8   6.4  99.0 1.88
+;ndetElim 9  18.1  99.0 1.89
+
+#####################
+# tracking strategies
+#####################
+
+#----------------
+# --> specify the tracking strategies to use
+# trackingstrategy <ndet> <option>
+#  0: full tracking
+#  1: [REMOVED] largest energy point (==first in E sort) 
+#  2: [REMOVED] random point                             
+#  3: 'kickout', break @ first worse permutation
+#  4: 'goodenough', break @ first OK FOM encountered
+#  5: 'jump', specify jump option: g...t...
+
+trackingstrategy 1 0
+trackingstrategy 2 0
+trackingstrategy 3 0
+trackingstrategy 4 0
+trackingstrategy 5 0
+
+# use for full tracking (usually too costly CPU wise)
+;trackingstrategy 4 0
+;trackingstrategy 5 0
+;trackingstrategy 6 0
+;trackingstrategy 7 0
+;trackingstrategy 8 0
+
+# use for realistic realtime tracking
+;trackingstrategy 4 5 ggtt
+;trackingstrategy 5 5 ggttt
+trackingstrategy 6 5 ggtttt
+trackingstrategy 7 5 gggtttt
+trackingstrategy 8 5 gggttttt
+
+#------------------------------------------------
+# figure of merit cuts. In the trackingstrategy
+# of 'goodenough', we bail if we get a FOM below 
+# the fomgoodenough value given. In the 'jump'
+# trackingstrategy we jump to next group if the
+# FOM is above the fomjump value given.
+
+fomjump 1.0
+fomgoodenough 1.0
+
+########################################################
+# methods for dealings with UNTRACKED (monster) clusters
+########################################################
+
+#----------------
+# enable reclustering for UNTRACKED (monster) clusters
+# [method 1 of 2 to deal with those]
+#               +- 'kickout' FOM value
+#               |   +- threshold FOM for recluster
+#               |   |   +- ndet minimum for reclustering
+#               |   |   |  +- max number of reductions in alpha
+#               |   |   |  |   +- reduction factor for alpha
+#               |   |   |  |   |
+recluster1    0.01  0.1  3 10  0.90
+
+#----------------
+# enable splitting of clusters for UNTRACKED (monster) clusters
+# [method 2 of 2 to deal with those]
+#               +- 'kickout' FOM value
+#               |     +- threshold FOM for splitting
+#               |     |    +- ndet minimum for splitting
+#               |     |    |  +- ndet maximum for splitting
+#               |     |    |  |  +- max number of tries before giving up
+#               |     |    |  |  |   
+#               |     |    |  |  |   
+;splitclusters1 0.01 0.6   3 16 100
+
+#----------------
+# fom kickout value for big untrackted monster clusters
+# when they are split (we can't use a fraction
+# as we do for already tracked clusters)
+
+untracked_fom_kickout 0.1
+
+
+################################################
+# methods for splitting already tracked clusters 
+# that don't look right
+################################################
+
+#----------------
+# enable reclustering for TRACKED clusters
+#               +- 'kickout' FOM value
+#               |   +- threshold FOM for recluster
+#               |   |   +- ndet minimum before trying to recluster
+#               |   |   |  +- max number of reductions in alpha
+#               |   |   |  |   +- reduction factor for alpha
+#               |   |   |  |   |
+;recluster2  0.10  0.8   3  6  0.90
+
+#----------------
+# enable splitting of clusters 
+#                 +- 'kickout' FOM value
+#                 |   +- threshold FOM for splitting
+#                 |   |   +- ndet minimum for splitting
+#                 |   |   |  +- ndet maximum for splitting
+#                 |   |   |  |  +- max number of tries before giving up
+#                 |   |   |  |  |   +- good enough improvement fraction
+#                 |   |   |  |  |   |
+;splitclusters2 0.10 0.7  3  16 200 0.4
+
+################################################
+# methods for combining already tracked clusters 
+# that don't look right
+################################################
+
+#----------------
+# enable combination of clusters
+#                 +- 'kickout' FOM value
+#                 |   +- threshold FOM for combining
+#                 |   |   +- ndet maximum for combining
+#                 |   |   |  +- max distance for inclusion attempt (cm)
+#                 |   |   |  |
+;combineclusters 0.01  0.05  8  100
+
+##################################
+# combine single hits (matchmaker)
+# (requires singlesfom to be set to 
+#  something finite)
+##################################
+
+#           +- 'kickout' FOM value
+#           |    +- max distance for inclusion attempt (cm)
+#           |    |
+;matchmaker 0.05 10
+
+#----------------
+# number of itterative loops (more than one
+# is very CPU costly! and does not help much
+# at the moment, could even hurt!)
+
+itterations 1
+
+#------------------------------------
+# misc
+
+nprint 20
+
+
+##############################################
+# single hit range function
+# single hits outside range will be assigned (large) FOM
+# so they can be cut when we sort.
+# this value overwrites above^^^
+# given [90% interaction length +0.5cm], see pdf for documentation
+##############################################
+
+#                  +-- number of datapoints following
+#                  |  +-- set FOM to this value outside range
+#                  |  |    +-- target to detector distance [cm]
+#                  |  |    |
+#                  |  |    |   +----- range mutiplication factor
+singlehitmaxdepth 18 1.85 18.5 1.0
+0.000 0.59
+0.080   0.59
+0.100   1.01
+0.150   2.26
+0.200   3.39
+0.300   4.98
+0.400   6.04
+0.500   6.86
+0.600   7.56
+0.800   8.76
+1.000   9.83
+1.250  11.04
+1.500  12.09
+2.000  13.78
+3.000  15.98
+4.000  17.19
+5.000  17.83
+16.3  20.0
+# |   |
+# |   +-- range (from surface of crystal) [cm]
+# +-- energy [MeV]
+# [data points for 0.0 and 16.3 must be there]
+
+############################################
+# special for data that already has world coordinates
+
+;nocrystaltoworldrot
+

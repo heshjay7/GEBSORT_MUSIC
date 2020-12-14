@@ -1,0 +1,32 @@
+# chat file for GEBFilter
+
+echo
+nevents 2000000000
+
+##################################
+# if enabled, use ns rather than 10 nsec ticks
+# do TS --> TS*10+(long long int)(T0+0.5)
+# for mode2 data and just
+#    TS --> TS*10
+# for any other GEBHEader type
+# if used, you must change time windows!!
+
+;addT0
+
+##################################
+# process vetocube from GEBSort
+#
+
+;vetocube vetospots.dat
+
+##################################
+# write GT data in AGATA G4 ascii format
+#
+
+;GT2AGG4 GTDATA/AGG4_ascii.dat
+
+##################################
+# slow down data to simulate on-line
+
+;waitusec 10
+

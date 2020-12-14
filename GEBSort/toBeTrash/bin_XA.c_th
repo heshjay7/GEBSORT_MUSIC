@@ -1,0 +1,897 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <math.h>
+#include <string.h>
+#include <assert.h>
+#include <limits.h>
+
+#include "Rtypes.h"
+#include "TROOT.h"
+#include "TFile.h"
+#include "TRandom.h"
+#include "TH1.h"
+#include "TH2.h"
+#include "TObjArray.h"
+#include "TObject.h"
+#include "TKey.h"
+#include "TSystem.h"
+#include "TCutG.h"
+#include "TTree.h"
+#include "gdecomp.h"
+#include "GEBSort.h"
+#include "GTMerge.h"
+#define NGSGE NGE
+#include "gsang.h"
+
+#define TAPE_MOVED 10
+#define EBIS_CLOCK 11
+#define BETA_FIRED 12
+
+#define ALL2DS 0
+#define BASICSONLY 1
+
+/* parameters */
+extern DGSEVENT XAEvent[MAXCOINEV];
+extern int XAng;
+extern PARS Pars;
+int XAtlkup[NCHANNELS];
+int XAtid[NCHANNELS];
+
+// to be determined by the experimentalists ...
+int gb_dt_lim = -10, gb_dt_lim2 = 40;   // Gamma-Beta coin gate (EhiBeta)
+int gg_lim1 = -20, gg_lim2 = 20;        // Clover-Clover coin gate (hClovClov_DT)
+int tg_lim1 = 620, tg_lim2 = 1220;      // Gate on the tape (ClovClov1, ...)
+
+  // X-array - histogram definitions - FGK - 062019
+TH1D *hBetaCounter;
+TH2F *hEhiBeta, *hEhiClo;
+TH2F *hGeBeta_DT, *hGeTape_DT, *hGeGe_DT;
+TH2F *hClovID, *hClovBetaID, *hClovMult, *hClovBetaMult;
+TH2F *hClovTape_DT, *hClovClov_DT, *hClovClov, *hClovClov1;
+
+/* pointers to ROOT spectra */
+TH1D *XAhEventCounter;
+TH2F *XAhGeCounter, *XAhBGOCounter;
+TH2F *XAhEhiRaw, *XAhEhiRawRaw, *XAhEhiCln, *XAhEhiDrty, *XAhEhiCln_nodop;
+TH2F *XAhGeBGO_DT;
+TH2F *XApzraw;
+TH2F *XAbase1_diff;
+TH2F *XAbase2_diff;
+TH1D *XAhrr;
+TH2F *xa_gg;
+TH2F *Xebl, *Xes1,*Xbls1;
+#if(ALL2DS)
+TH2F *XAe2_e1vse1[NGE + 1];
+TH2F *XASZe2_e1vse1[NGE + 1];
+TH2F *XAhbase1, *XAhbase2;
+#endif
+
+/* Gain Calibration */
+
+float XAehigain[NGE + 1];
+float XAehioffset[NGE + 1];
+float XAehibase[NGE + 1];
+float XAbl_array[5000];
+float XAPZ[NGE + 1];
+float XAave_base[NGE + 1];
+long long int xaHeaderID[20];
+
+float XAbase1, XAbase2, XAbase1_av = 0;
+long long int ntapemoves;
+
+/*Tianheng's calibration variables*/
+float XM = 200.0;                // changed from 350.0
+int XMT = 1300;            // for M=200;
+//float XM = 350.0;
+//int XMT = 1450;            // for M=350;
+
+float Xath[NGE + 1], Xbth[NGE + 1];
+float XPth[NGE + 1],XP0th[NGE + 1],XP1th[NGE + 1], XP2th[NGE + 1], XBLPth[NGE + 1]; 
+float XKth=146;
+int XdBLth= 1000;
+int XNavth=3000;
+int Xith[NGE + 1]={0};
+int Xisth[NGE + 1]={0};
+//float XBLTth[NGE + 1];
+float XBLCth[NGE + 1][3000];   //3000 = xNavth;
+float XBLSth[NGE + 1]={0};
+float XBLth,XBLavfth,XBLavth[NGE + 1]; 
+float XBLth1,XBLth2,XBLth3;
+
+float XBLavfpth,XBLfth;
+float XLth,XLbth,XLeth;
+float XEth,XS1th,XS2th,XPLth,XS1pth,XS2pth,XEpth,XS1idth[111]={0};
+float XS1bpth,XS1epth,XS1bidth[111]={0},XS1eidth[111]={0};
+unsigned short int XIdth,XBsth,XS1bth,XS1eth,XS2bth,XS2eth;
+unsigned long long int XTth,XTPth,XdTth,XdTpth,XTppth,XdTbth=0,XdTidth[111]={0};
+int XS0th,XTsth[1025];
+int XNth=0,XNpth=0;
+
+unsigned short int XTrath[1025];
+
+TH2F *hXBLRaw,*hXS1Raw,*hXS2Raw,*hXS1bRaw,*hXS1eRaw,*hXS0Raw,*hXdTS0;
+
+#define Xth 0
+#if(Xth)
+/*Root File for the calibration_Tianheng*/
+ TFile f1("./Calibration/XA_th182.root","RECREATE");
+  TTree tr("tr","XAET_cal");
+#endif
+
+/*---------------------------------------------------------------------*/
+void
+XAgetcal (char *file)
+{
+  int i,ii, ret = 0;
+  // float b, c, d;
+  float a, b, c, d;
+  char mystring[1000];
+  FILE *fp;
+
+  // fp = fopen ("./Calibration/PG002ch1.cal", "r");
+  //  fp = fopen ("./Calibration/XA_th.cal", "r");
+  //  fp = fopen ("./Calibration/XA2_th.cal", "r");
+ fp = fopen ("./Calibration/XA2_th.cal", "r");
+  if (fp == NULL)
+    {
+      printf ("could not open the Para.cal file\n");
+      return;
+    }
+  else
+    {
+
+      // read file and parse
+      fgets (mystring, 255, fp);
+      //      fgets (mystring, 255, fp);
+
+      for(ii=1;ii<=20;ii++)
+        {
+	  //          fscanf (fp, "%i  %f  %f  %f  %f  %f  %f  %f ", &i, &a, &b, &c, &d, &e, &f, &g);
+	  fscanf (fp, "%i  %f  %f  %f  %f", &i, &a, &b, &c, &d);
+          XPth[i] = a;
+          Xath[i] = b;
+	  Xbth[i] = c;
+	  XBLPth[i] = d;
+	  //          printf ("ge %3i has P0,P1,P2,P,a,b and BL of: %8.2f %8.4f %8.2f %8.2f %8.2f %8.2f %8.2f\n", i,P0th[i],P1th[i],P2th[i],Pth[i],ath[i], bth[i], BLPth[i]);
+         printf ("ge %3i has XP,Xa,Xb and XBL of: %8.2f %8.4f %8.2f %8.2f\n", i,XPth[i],Xath[i], Xbth[i], XBLPth[i]);
+        }
+      fclose (fp);
+    }
+
+  /* done */
+  return;
+
+}
+
+
+/*-----------------------------------------------------*/
+int
+sup_XA ()
+{
+
+  /* declarations */
+  char str[256];
+  FILE *fp;
+  int i, i1, i2, i7, i8;
+  int imod, ichan;
+
+// functions for making root histograms 
+  TH2F *make2D (const char *, int, int, int, int, int, int);
+  TH1D *make1D (const char *, int, int, int);
+
+  //   XAhEhiRaw = make2D ("XAEhiRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);;
+  //  XAhEhiCln = make2D ("XAEhiCln", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  //  XAhEhiRawRaw = make2D ("XAEhiRawRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+
+#if(Xth)
+  tr.Branch("Geid",  &XIdth,   "XIdth/s");
+  tr.Branch("N",  &XNth,   "XNth/I");
+  //  tr.Branch("Bs",  &Bsth,   "Bsth/s");
+   tr.Branch("S1b",  &XS1bth,   "XS1bth/s");
+   tr.Branch("S1e",  &XS1eth,   "XS1eth/s");
+   tr.Branch("S2b",  &XS2bth,   "XS2bth/s");
+   tr.Branch("S2e",  &XS2eth,   "XS2eth/s");
+   //   tr.Branch("T",  &XTth,   "Tth/l");
+//  tr.Branch("TP",  &XTPth,   "TPth/l");
+  tr.Branch("dT",  &XdTth,   "XdTth/l");
+  tr.Branch("E",  &XEth,  "XEth/F" );
+  tr.Branch("S1", &XS1th,  "XS1th/F");
+  tr.Branch("S2", &XS2th,  "XS2th/F");
+  tr.Branch("S0", &XS0th,  "XS0th/I");
+  tr.Branch("BLav", &XBLavfth,  "XBLavfth/F");
+  //  tr.Branch("P", &XPLth,  "PLth/F");
+  //  tr.Branch("Pc", &XPcth,  "Pcth/F");
+  // tr.Branch("BLavp", &XBLavfpth,  "BLavfpth/F");
+  // tr.Branch("Ep",  &XEpth,  "Epth/F" );
+  //  tr.Branch("dTp",  &XdTpth,   "dTpth/l");
+  //  tr.Branch("dTb",  &XdTbth,   "dTbth/l");
+  tr.Branch("S1p", &XS1pth,  "XS1pth/F");
+  tr.Branch("S1bp", &XS1bpth,  "XS1bpth/F");
+  tr.Branch("S1ep", &XS1epth,  "XS1epth/F");
+  //  tr.Branch("S2p", &XS2pth,  "S2pth/F");
+  // tr.Branch("BLf", &XBLfth,  "BLfth/F");
+  //  tr.Branch("L", &XLth,  "Lth/F");
+  //   tr.Branch("Trace", XTrath,  "Trath[1025]/s");
+  //   tr.Branch("T", XTsth,  "Tsth[1025]/I");
+  //  tr.Branch("Lb", &XLbth,  "Lbth/F");
+  //  tr.Branch("Le", &XLeth,  "Leth/F");
+#endif
+
+#if(BASICSONLY==0)
+// 2-D's for PZ and Baseline
+  XApzraw = make2D ("XApzraw", NGE + 1, 1, NGE + 1, 2000, 0, 2.0);
+
+// 2-D's for Energy
+
+  XAhEhiRaw = make2D ("XAEhiRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  XAhEhiRawRaw = make2D ("XAEhiRawRaw", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  XAhEhiCln = make2D ("XAEhiCln", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  XAhEhiCln_nodop = make2D ("XAEhiCln_nodop", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  XAhEhiDrty = make2D ("XAEhiDrty", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  /* simple gg matix */
+
+ // xa_gg = make2D ("xa_gg", Pars.GGMAX, 1, Pars.GGMAX, Pars.GGMAX, 1, Pars.GGMAX);
+ // xa_gg->SetXTitle ("g1");
+ // xa_gg->SetYTitle ("g2");
+
+  hBetaCounter = make1D ("BetaCounter", 14400, 0, 14400);
+
+// X-array - 2-D's  
+  hEhiBeta = make2D ("EhiBeta", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  hEhiClo = make2D ("EhiClo", LENSP, 0, LENSP + 1, NGE + 1, 1, NGE + 1);
+  hGeGe_DT = make2D ("GeGe_DT", 2048, -1024, 1024, NGE + 1, 1, NGE + 1);
+  hGeBeta_DT = make2D ("GeBeta_DT", 400, -200, 200, NGE + 1, 1, NGE + 1);
+  hGeTape_DT = make2D ("GeTape_DT", 4000, 0, 4001, 4000, 0, 4001);
+
+#endif
+
+  hXBLRaw = make2D ("XBLRaw", 20000, -5000, 20000, 21, 0, 21);
+  hXS1Raw = make2D ("XS1Raw", 20000, -5000, 20000, 21, 0, 21);
+  hXS2Raw = make2D ("XS2Raw", 20000, -5000, 20000, 21, 0, 21);
+  hXS1bRaw = make2D ("XS1bRaw", 20000, -5000, 20000, 21, 0, 21);
+  hXS1eRaw = make2D ("XS1eRaw", 20000, -5000, 20000, 21, 0, 21);
+  hXS0Raw = make2D ("XS0Raw", 20000, -5000, 20000, 21, 0, 21);
+  hXdTS0 = make2D ("XdTS0", 2000, 0, 2000, 2000, -1000, 20000);
+  Xebl= make2D ("Xebl", 2000, 0, 2000, 6000, 0, 6000);
+  Xes1= make2D ("Xes1", 2000, 0, 2000, 6000, 0, 6000);
+    //  Xbls1= make2D ("Xbls1", 6000, 0, 6000, 6000, 0, 6000);
+  //  hClovID = make2D ("ClovID", LENSP, 0, LENSP + 1, 10, 0, 10);
+  //  hClovBetaID = make2D ("ClovBetaID", LENSP, 0, LENSP + 1, 10, 0, 10);
+  //  hClovMult = make2D ("ClovMult", LENSP, 0, LENSP + 1, 10, 0, 10);
+  //  hClovBetaMult = make2D ("ClovBetaMult", LENSP, 0, LENSP + 1, 10, 0, 10);
+ // hClovTape_DT = make2D ("ClovTape_DT", 4000, 0, 4001, 4000, 0, 4001);
+ // hClovClov_DT = make2D ("ClovClov_DT", 2048, -1024, 1024, NGE + 1, 1, NGE + 1);
+ //hClovClov = make2D ("ClovClov", 4096, 0, 4096, 4096, 0, 4096);
+  //hClovClov1 = make2D ("ClovClov1", 4096, 0, 4096, 4096, 0, 4096);
+  ntapemoves = 0;
+
+
+#if(ALL2DS)
+
+  XAbase1_diff = make2D ("XAbase1_diff", NGE + 1, 1, NGE + 1, 2048, -1024, 1024);
+  XAbase2_diff = make2D ("XAbase2_diff", NGE + 1, 1, NGE + 1, 2048, -1024, 1024);
+  XAhbase1 = make2D ("XAhbase1", NGE + 1, 1, NGE + 1, 4096, 0, 16384);
+  XAhbase2 = make2D ("XAhbase2", NGE + 1, 1, NGE + 1, 4096, 0, 16384);
+
+  for (i = 1; i <= NGE; i++)
+    {
+      sprintf (str, "XAe2_e1vse1_%3.3i", i);
+      XAe2_e1vse1[i] = make2D (str, 2048, 1, 10000, 1024, 1, 10000);
+      sprintf (str, "XASZe2_e1vse1_%3.3i", i);
+      XASZe2_e1vse1[i] = make2D (str, 2048, 1, 10000, 1024, 1, 10000);
+    };
+
+#endif
+
+
+// 2-D's for Rate
+
+  // XAhEventCounter = make1D ("XAEvntCounter", 14400, 0, 14400);  // Good for 4 hours if Counts/sec
+  //  XAhrr = make1D ("XArr", 1012, 0, 2);
+  //  XAhGeCounter = make2D ("XAGeCounter", 14400, 0, 14400, NGE + 1, 1, NGE + 1);
+  //  XAhBGOCounter = make2D ("XABGOCounter", 14400, 0, 14400, NGE + 1, 1, NGE + 1);
+
+
+// 2-D's for Tacs
+
+//  XAhGeBGO_DT = make2D ("XAGeBGO_DT", 400, -200, 200, NGE + 1, 1, NGE + 1);
+
+
+
+  /* -------------------- */
+  /* read in the map file */
+  /* -------------------- */
+  for (i = 0; i < NCHANNELS; i++)
+    {
+      XAtlkup[i] = NOTHING;
+      XAtid[i] = NOTHING;
+    };
+
+  fp = fopen ("XA_map.dat", "r");
+  if (fp == NULL)
+    {
+      printf ("need an \"XA_map.dat\" file to run\n");
+      exit (1);
+    };
+
+  printf ("\nXAmapping - started\n");
+
+  i2 = fscanf (fp, "\n%i %i %i %s", &i1, &i7, &i8, str);
+  while (i2 == 4)
+    {
+      XAtlkup[i1] = i7;
+      XAtid[i1] = i8;
+      i2 = fscanf (fp, "\n%i %i %i %s", &i1, &i7, &i8, str);
+      ichan = i1 % 10;
+      imod = (i1 - ichan) / 10;
+      printf ("map: %4i ( %3i %1i ) %3i %3i %7s -- (official) ", i1, imod, ichan, i7, i8, str);
+      switch (i7)
+        {
+        case GE:
+          printf ("GE\n");
+          break;
+        case BGO:
+          printf ("BGO\n");
+          break;
+        case SIDE:
+          printf ("SIDE\n");
+          break;
+        case AUX:
+          printf ("AUX\n");
+          break;
+        case DSSD:
+          printf ("DSSD\n");
+          break;
+        case FP:
+          printf ("FP\n");
+          break;
+        case XARRAY:
+          printf ("XARRAY\n");
+          break;
+        case CHICO2:
+          printf ("CHICO2\n");
+          break;
+        case SSD:
+          printf ("SSD\n");
+          break;
+        case CLOVER:
+          printf ("CLOVER\n");
+          break;
+        case SPARE:
+          printf ("SPARE\n");
+          break;
+        case SIBOX:
+          printf ("SIBOX\n");
+          break;
+        default:
+          printf ("dont know what this is\n");
+          break;
+
+        };
+    };
+  fclose (fp);
+
+  printf ("\nmapping - complete!!\n");
+
+  /* Set Default Calibration and PZ parameters */
+
+  for (i = 0; i <= NGE + 1; i++)
+    {
+      XAehigain[i] = 1.0;
+      XAehioffset[i] = 0.0;
+      XAPZ[i] = 1.0;
+      XAehibase[i] = 0.0;
+    };
+
+  for (i = 0; i < 5000; i++)
+    {
+      XAbl_array[i] = 0;
+    }
+
+  for (i = 0; i < NGE + 1; i++)
+    {
+      XAave_base[i] = 0;
+    }
+
+  /* get the DGS calibration file */
+
+  XAgetcal (Pars.xa_ecalfn);
+
+  /* dgs header ids */
+
+  for (i = 0; i < 20; i++)
+    xaHeaderID[i] = 0;
+
+  /* done */
+
+ for(i=1;i<=20;i++)
+    {
+      XBLavth[i]=XBLPth[i];
+      //      XBLTth[i]=XBLPth[i];
+      }
+
+  return (0);
+};
+
+
+/*-----------------------------------------------------*/
+int
+exit_XA ()
+{
+
+  /* declarations */
+  printf ("\nbegin exit_XA\n");
+  printf ("tape moved %lli times in this dataset\n", ntapemoves);
+
+  /* done */
+  printf ("done exit_XA\n");
+  return (0);
+};
+
+
+/* ----------------------------------------------------------------- */
+int
+bin_XA (GEB_EVENT * GEB_event)
+{
+
+/* declarations */
+  int i, j, gsid, e, tdiff, tdiff1, tdiff2, st;
+  unsigned long long int EvTimeStam0;
+  int is_beta = 0;
+  static long long int tape_ts, ebis_ts, beta_ts;
+  char str[128];
+  int RelEvT = 0;
+  float Energy, Energy_nodop, top, bot, r1, rr;
+  double d1, d2, erawraw[NGE + 1];
+
+  /* prototypes */
+
+  int GebTypeStr (int type, char str[]);
+  int DGSEvDecompose_v3 (unsigned int *ev, int len, DGSEVENT * XAEvent, int tlkup[], int tid[]);
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    printf ("\nentered bin_XA:\n");
+
+#if(1)
+  /* temp fix of header 24-->XA for testing */
+
+  for (i = 0; i < GEB_event->mult; i++)
+    if (GEB_event->ptgd[i]->type == 24)
+      GEB_event->ptgd[i]->type = GEB_TYPE_XA;
+//  for (i = 0; i < GEB_event->mult; i++) 
+//    printf("%i is %i\n", i,  GEB_event->ptgd[i]->type);
+#endif
+
+//  for (i=1000;i<1030;i++)
+//    printf("debug1: %i: tlkup %i tid %i\n", i, XAtlkup[i], XAtid[i]);
+
+  /* loop through the coincidence event and fish out XA data */
+  /* (gamma rays) count in XAng */
+
+  XAng = 0;
+  for (i = 0; i < GEB_event->mult; i++)
+    {
+      if (GEB_event->ptgd[i]->type == GEB_TYPE_XA)
+        {
+          if (Pars.CurEvNo <= Pars.NumToPrint)
+            {
+              GebTypeStr (GEB_event->ptgd[i]->type, str);
+              printf ("bin_XA (header): %2i> %2i, %s, TS=%lli\n", i, GEB_event->ptgd[i]->type, str,
+                      GEB_event->ptgd[i]->timestamp);
+            }
+
+          st =
+            DGSEvDecompose_v3 ((unsigned int *) GEB_event->ptinp[i], GEB_event->ptgd[i]->length / sizeof (unsigned int),
+                               &XAEvent[XAng], XAtlkup, XAtid);
+          if (st != 0)
+            return (0);
+          XAng++;
+        }
+    }
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    {
+      printf ("XAng=%i\n", XAng);
+      for (i = 0; i < XAng; i++)
+        {
+          printf ("gsid=XAEvent[i].tid=%i ", XAEvent[i].tid);
+          printf ("tpe=%i ", XAEvent[i].tpe);
+          printf ("ts %lli\n", XAEvent[i].event_timestamp);
+          if (XAEvent[i].tpe == TAPE_MOVED)
+            printf ("10 tape moved\n");
+          if (XAEvent[i].tpe == EBIS_CLOCK)
+            printf ("11 EBIS clock\n");
+          if (XAEvent[i].tpe == BETA_FIRED)
+            printf ("12 beta fired\n");
+        };
+    };
+  EvTimeStam0 = XAEvent[0].event_timestamp;
+  if (EvTimeStam0 == 0)
+    EvTimeStam0 = XAEvent[0].event_timestamp;
+  RelEvT = (int) ((XAEvent[0].event_timestamp - EvTimeStam0) / 100000000);      // overflow?
+  //  XAhEventCounter->Fill (RelEvT);
+
+  /* Loop */
+  for (i = 0; i < XAng; i++)
+    {
+      gsid = XAEvent[i].tid;
+      if (XAEvent[i].tpe == GE)
+        {
+          /* this should be unnecessary to do; */
+          /* but we sometimes crash if we don't */
+          /* needs to be looked at */
+	           if (gsid < 1 || gsid > NGE)
+            {
+              printf ("bad gsid= %i\n", gsid);
+              fflush (stdout);
+              gsid = 0;
+	      };
+    
+
+	  /*Tianheng's Method implementation */
+
+	  XBsth= XAEvent[i].base_sample;
+//	  XTth= XAEvent[i].event_timestamp; 
+          XTth =  XAEvent[i].event_timestamp & 0x3FFFFFFF; 
+	  XTPth=  XAEvent[i].last_disc_timestamp;
+	  if(XTth<XTPth){XTth=XTth+1073741823;}  //1073741823=3FFFFFFF
+	  //          XEth = (XAEvent[i].sum2- XAEvent[i].sum1)/XM;
+	  //          XBlth = XAEvent[i].sum1/XM;
+          XS1th = XAEvent[i].sum1;
+          XS2th = XAEvent[i].sum2;
+	  XdTth= XTth-XTPth;
+	  XS0th=  XAEvent[i].sampled_baseline;
+	  //	  XS0th=XS0th*64;
+	  XS1bth=XAEvent[i].m1begin;
+          XS1eth=XAEvent[i].m1end;
+	  XS2bth=XAEvent[i].m2begin;
+          XS2eth=XAEvent[i].m2end;
+
+	  hXS1Raw->Fill(XS1th/XM, gsid);
+	  hXS2Raw->Fill(XS2th/XM, gsid);
+	  hXS1bRaw->Fill(XS1bth, gsid);
+	  hXS1eRaw->Fill(XS1eth, gsid);
+	  hXS0Raw->Fill(XS0th/1024., gsid);
+	  hXdTS0->Fill(XdTth,XS0th/1024.);
+
+	  if(XS1th/XM>2&&XS1th/XM<=16382)
+	    {
+	  
+	        XBLth= (XS1eth-XS1bth*XPth[gsid])/(1-XPth[gsid]);
+	  
+ 
+        	hXBLRaw->Fill(XBLth, gsid);
+
+				if(XBLth<-5000 || XBLth>5000)
+		//			if(XBLth<XBLavth[gsid]-XdBLth||XBLth>XBLavth[gsid]+XdBLth)
+ 		{XBLth=XBLavth[gsid];}
+
+		//		XBLTth[gsid]=XBLth;
+
+	  if(Xith[gsid]==XNavth)
+	    {
+	      Xith[gsid]=0;
+	      if(Xisth[gsid]==0){Xisth[gsid]=1;}
+	    }
+
+	 if(Xisth[gsid]==0)
+	   {
+	     XBLCth[gsid][Xith[gsid]]=XBLth;
+	     XBLSth[gsid]=XBLSth[gsid]+XBLCth[gsid][Xith[gsid]];
+	     XBLavth[gsid]=XBLSth[gsid]/(Xith[gsid]+1);
+	   }
+	 else
+	   {
+	     XBLSth[gsid]=XBLSth[gsid]-XBLCth[gsid][Xith[gsid]];
+	     XBLCth[gsid][Xith[gsid]]=XBLth;
+	     XBLSth[gsid]=XBLSth[gsid]+XBLCth[gsid][Xith[gsid]];
+	     XBLavth[gsid]=XBLSth[gsid]/XNavth;
+	   }
+
+	XBLavfth=XBLavth[gsid];
+	Xith[gsid]++;
+
+	Energy =  XS2th/XM - XBLavfth - (XS1th/XM - XBLavfth) * pow(XPth[gsid], (XM+XKth)/XM);
+		//		Eth = Energy;
+
+        Energy = Energy*Xath[gsid] + Xbth[gsid];
+	 	XEth = Energy;
+
+	  if(gsid==7) 
+	    {
+	       Xebl->Fill(Energy,XBLavfth);
+	       Xes1->Fill(Energy,XS1th/XM);
+	       //	       Xbls1->Fill(XAave_base[gsid],XAEvent[i].sum1 / Pars.xa_MM);
+	    }
+
+	    }
+	  else Energy = 0;
+#if(Xth) 
+         XIdth = gsid;
+	 //	  Npth=0;
+	 XPLth=(XS1eth-XBLavfth)/(XS1bth-XBLavfth);
+		  XdTbth=XdTidth[gsid];
+		  XS1pth=XS1idth[gsid]; 
+		  XS1bpth=XS1bidth[gsid];
+		  XS1epth=XS1eidth[gsid]; 
+		  //	  if(XdTbth>15000)  
+		  if(abs(XS1pth/XM-XS1bpth)<2&&abs(XS1pth/XM-XS1epth)<2&&XS1pth/XM>2&&XS1pth/XM<16383&&XS1th/XM>2&&XS1th/XM<16383&&XS2th/XM>2&&XS2th/XM<16383)
+		  	{
+	
+			tr.Fill();
+
+			   }
+			XdTidth[gsid]=XdTth;
+			XS1idth[gsid]=XS1th;
+			XS1bidth[gsid]=XS1bth;
+			XS1eidth[gsid]=XS1eth; 
+			//	}
+	      XNth++;         
+#endif
+
+          /* doppler correct the energy */
+	           Energy_nodop = Energy;
+          if (Pars.vc_xa != 0)
+            {
+              d1 = angtheta[gsid - 1] / 57.29577951;
+              Energy = Energy * (1 - Pars.vc_xa * cos (d1)) / sqrt (1 - Pars.vc_xa * Pars.vc_xa);
+            }
+          if (Pars.enabled[gsid])
+            {
+              XAEvent[i].ehi = Energy;
+              XAEvent[i].ehi_nodop = Energy_nodop;
+            }
+          else
+            {
+              // mark bad 
+              XAEvent[i].ehi = -1;
+              XAEvent[i].ehi_nodop = -1;
+            }
+          XAEvent[i].id = gsid;
+	  
+        }
+    }                           /* for (i = 0; i < ng; i++) */
+
+  /* Energy Histogram loop */
+  /*
+  for (i = 0; i < XAng; i++)
+    {
+      if (XAEvent[i].tpe == GE)
+        {
+          if (erawraw[i] > 0 && erawraw[i] < LENSP)
+            XAhEhiRawRaw->Fill (erawraw[i], gsid);
+          e = (int) XAEvent[i].ehi;
+          if (e > 0 && e < LENSP)
+            {
+              gsid = XAEvent[i].tid;
+              XAhEhiRaw->Fill (e, gsid);
+              if (XAEvent[i].flag == 0)
+                {
+                  XAhEhiCln->Fill (e, gsid);
+                  XAhEhiCln_nodop->Fill (XAEvent[i].ehi_nodop, gsid);
+                };
+              if (XAEvent[i].flag == 1)
+                XAhEhiDrty->Fill (e, gsid);
+            };
+        };
+    }
+  */
+  /* gg matrix */
+/*
+  for (i = 0; i < XAng; i++)
+    if (Pars.enabled[XAEvent[i].tid])
+      if (XAEvent[i].tpe == GE)
+        if (XAEvent[i].flag == 0)
+          if (XAEvent[i].ehi > 0 && XAEvent[i].ehi < Pars.GGMAX)
+            for (j = i + 1; j < XAng; j++)
+              if (Pars.enabled[XAEvent[j].tid])
+                if (XAEvent[j].tpe == GE)
+                  if (XAEvent[j].flag == 0)
+                    if (XAEvent[j].ehi > 0 && XAEvent[j].ehi < Pars.GGMAX)
+                      {
+                        xa_gg->Fill ((double) XAEvent[i].ehi, (double) XAEvent[j].ehi, 1);
+                        if (Pars.CurEvNo <= Pars.NumToPrint)
+                          printf ("filled dgs_gg with %f %f\n", XAEvent[i].ehi, XAEvent[j].ehi);
+                      } */
+
+/* debug list the gamma rays we found */
+
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    {
+      printf ("final list: we have %i gamma rays\n", XAng);
+      for (i = 0; i < XAng; i++)
+        {
+          printf ("%2i> ", i);
+          printf ("chan_id=%i; ", XAEvent[i].chan_id);
+          printf ("board_id=%i; ", XAEvent[i].board_id);
+          printf ("id =%i; ", XAEvent[i].id);
+          printf ("tpe=%i; ", XAEvent[i].tpe);
+          printf ("tid=%i; ", XAEvent[i].tid);
+          printf ("EventTS=%llu; ", XAEvent[i].event_timestamp);
+          printf ("ehi=%8f ", XAEvent[i].ehi);
+          if (XAEvent[i].flag == 1)
+            printf ("(dirty)");
+          else
+            printf ("(clean)");
+          if (Pars.enabled[gsid])
+            printf ("(enabled)");
+          else
+            printf ("(disabled)");
+          printf ("\n");
+          fflush (stdout);
+        };
+    };
+
+// initial loop through the channels
+  for (i = 0; i < XAng; i++)
+
+    {
+      if (XAEvent[i].tpe == TAPE_MOVED)
+
+        {
+
+          /* we can usually afford to print this out every time */
+          if (Pars.CurEvNo <= Pars.NumToPrint || 1)
+
+            {
+              d1 = XAEvent[i].event_timestamp - tape_ts;
+              d1 /= 100000000;
+              printf ("tape moved @TS=%lli; time since last tape move: %5.2f sec\n", XAEvent[i].event_timestamp, d1);
+            };
+          ntapemoves++;
+          tape_ts = XAEvent[i].event_timestamp;
+        }
+      if (XAEvent[i].tpe == EBIS_CLOCK)
+
+        {
+          ebis_ts = XAEvent[i].event_timestamp;
+
+          //printf("EBIS Clock %i \n",XAEvent[i].tpe);
+        }
+      if (XAEvent[i].tpe == BETA_FIRED)
+
+        {
+          is_beta = 1;
+          beta_ts = XAEvent[i].event_timestamp;
+          hBetaCounter->Fill ((int) ((beta_ts - EvTimeStam0) / 100000000));
+
+//      printf("Beta Detected %llu %llu \n",XAEvent[i].event_timestamp,beta_ts); 
+        }
+    };
+
+  /* Energy Histograms loop */
+
+    int cbc[21];
+         for (i = 0; i < XAng; i++)
+
+    {
+
+// time difference between clover crystal 1 and any other crystals 
+      gsid = XAEvent[i].tid;
+      if (gsid != 1)
+
+        {
+          tdiff = (int) (XAEvent[1].event_timestamp - XAEvent[i].event_timestamp);
+	  //         hGeGe_DT->Fill (tdiff, gsid);
+          tdiff = (int) (XAEvent[i].event_timestamp - XAEvent[1].event_timestamp);
+	  //  hGeGe_DT->Fill (tdiff, gsid);
+        }
+      cbc[i] = 0;
+      if (XAEvent[i].tpe == 1)  // select Ge
+        {
+          e = (int) XAEvent[i].ehi;
+          if (e > 10 && e < LENSP)      // select E_gamma > 10 channel
+            {
+              gsid = XAEvent[i].tid;
+	      //  hEhiClo->Fill (e, gsid);
+              if (is_beta == 1) //  is_beta = 1 - beta is in the event
+                {
+                  tdiff = (int) (XAEvent[i].event_timestamp - beta_ts);
+		  //  hGeBeta_DT->Fill (tdiff, gsid);
+                  if (tdiff > gb_dt_lim && tdiff < gb_dt_lim2)  // beta-gama coin window  
+                    {
+		      //  hEhiBeta->Fill (e, gsid); // Generate beta-gated e_gamma vs id
+                      cbc[i] = 1;
+                    }
+                  if (tape_ts != 0)     // Generate tape histogram for beta-gated e_gamma 
+                    {
+                      tdiff = (int) ((XAEvent[i].event_timestamp - tape_ts) / 10000000);
+		      // hGeTape_DT->Fill (e, tdiff);
+                    }
+                }
+            }
+        }
+    }
+  /* Make summed clover. */
+  int cloverE[6];
+  int ii, clov_pu[6], clov_beta_coin[6], clov_mult[6];
+  unsigned long long int clov_ts[6];
+  unsigned long long int clov_ts0 = 0;
+  for (i = 1; i < 6; i++)
+
+    {
+      cloverE[i] = 0;
+      clov_pu[i] = 0;
+      clov_ts[i] = 0;
+      clov_beta_coin[i] = 0;
+      clov_mult[i] = 0;
+    };
+  for (i = 0; i < XAng; i++)
+
+    {
+      e = (int) XAEvent[i].ehi;
+      if (XAEvent[i].tpe == 1 && e > 10)        // select Ge and E_gamma > 10 ch
+        {
+          ii = 1;
+          for (j = 1; j < 20; j += 4)
+
+            {
+              if (XAEvent[i].tid > j - 1 && XAEvent[i].tid < j + 4)
+
+                {
+                  clov_mult[ii] = clov_mult[ii] + 1;
+                  cloverE[ii] = cloverE[ii] + e;
+                  if (clov_ts[ii] == clov_ts0)
+                    clov_ts[ii] = XAEvent[i].event_timestamp;
+                  if (clov_beta_coin[ii] == 0)
+                    clov_beta_coin[ii] = cbc[i];
+                  if (XAEvent[i].pileup_flag == 1)
+                    clov_pu[ii] = XAEvent[i].pileup_flag;       // pileup
+                }
+              ii++;
+            }
+        }
+    };
+  for (i = 1; i < 6; i++)
+
+    {
+      tdiff = (int) ((clov_ts[i] - tape_ts) / 10000000);
+      //     if (clov_beta_coin[i] == 1)
+       // hClovTape_DT->Fill (cloverE[i], tdiff);
+	//     hClovID->Fill (cloverE[i], i);
+      // if (clov_beta_coin[i] == 1)
+	//    hClovBetaID->Fill (cloverE[i], i);
+	//   hClovMult->Fill (cloverE[i], clov_mult[i]);
+      // if (clov_beta_coin[i] == 1)
+	//   hClovBetaMult->Fill (cloverE[i], clov_mult[i]);
+    }
+
+// g-g coincidence histograms
+ /* for (i = 1; i < 6; i++)
+
+    {
+      if (cloverE[i] > 10 && clov_beta_coin[i] == 1)
+
+        {
+          tdiff1 = (int) ((clov_ts[i] - tape_ts) / 10000000);   // 100 msec clover time vs tape_0
+          for (j = i + 1; j < 6; j++)
+
+            {
+              if (cloverE[j] > 10 && clov_beta_coin[j] == 1)
+
+                {
+                  tdiff2 = (int) ((clov_ts[j] - tape_ts) / 10000000);   // 100 msec clover time vs tape_0
+                  tdiff = (int) (clov_ts[j] - clov_ts[i]);
+                 // hClovClov_DT->Fill (tdiff, i);
+                  if (tdiff > gg_lim1 && tdiff < gg_lim2)
+
+                    {
+                 //     hClovClov->Fill (cloverE[i], cloverE[j]);
+                 //     hClovClov->Fill (cloverE[j], cloverE[i]);
+                      if (tdiff1 > tg_lim1 && tdiff1 > tg_lim1 && tdiff2 > tg_lim1 && tdiff2 > tg_lim1)
+
+                        {
+                   //       hClovClov1->Fill (cloverE[i], cloverE[j]);
+                    //      hClovClov1->Fill (cloverE[j], cloverE[i]);
+                        }
+                    }
+                }
+            }
+        }
+    } */
+
+  /* done */
+  if (Pars.CurEvNo <= Pars.NumToPrint)
+    printf ("exit bin_XA\n");
+  return (0);
+}

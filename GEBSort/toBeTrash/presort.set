@@ -1,0 +1,41 @@
+VerboseLevel:		0
+LastEvent:		0
+
+#Event Building
+EventTimeDiff:	300
+
+Sim.Resolution.File: all.res
+Sim.Threshold.File:  all_50.thresh
+Sim.Gretina.Position.Resolution:  2.0
+
+#Which hole contains each detector
+Detector.0:	1
+Detector.1:	2
+Detector.2:	3
+Detector.3:	4
+Detector.4:	5
+Detector.5:	6
+Detector.6:	7
+Detector.7:	8
+Detector.8:	9
+Detector.9:	10
+Detector.10:	11
+Detector.11:	12
+Detector.12:	13
+Detector.13:	14
+Detector.14:	15
+Detector.15:	16
+Detector.16:	17
+Detector.17:	18
+Detector.18:	19
+Detector.19:	20
+Detector.20:	21
+Detector.21:	22
+Detector.22:	23
+Detector.23:	24
+Detector.24:	25
+Detector.25:	26
+Detector.26:	27
+Detector.27:	28
+Detector.28:	29
+Detector.29:	30

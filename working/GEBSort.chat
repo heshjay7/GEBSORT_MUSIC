@@ -1,0 +1,32 @@
+
+# NOTE: both the input (geb or file) and
+# the output (rootfile or mapfile)
+# are now specified on the command line of GEBSort
+# all other parameters are specified in this chat file
+
+
+#-------------------------------------------
+# basic sort parameters 
+
+#--- max number of event to be sort
+nevents           10000000000
+
+#--- max time to be sort
+maxDataTime       86400
+#                 ^^ in seconds  fe 60*60*24
+
+#--- how many event will be printed in log
+printevents       1
+
+#--- mod of write event, i.e. for modwrite event, write
+modwrite          50000
+
+#--- time stamp write
+tsnumwrites       50
+#  +--- simple TS time window
+
+#--- coincident time window
+timewin           1000
+
+#-------------------------------------------
+exit
